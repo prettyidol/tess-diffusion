@@ -1,3 +1,4 @@
+
 # Simplex Diffusion Language Model (SDLM).
 
 We introduce Text-to-text Self-conditioned Simplex Diffusion (TESS), a text diffusion model that is fully non-autoregressive, employs a new form of self-conditioning, and applies the diffusion process on the logit simplex space rather than the typical learned embedding space.
