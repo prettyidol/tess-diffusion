@@ -128,6 +128,32 @@ class TrainingArguments(HFTrainingArguments):
     )
     ssdlm_optimizer: bool = field(default=False, metadata={"help": "If set, uses ssdlm optimizer."})
 
+    # Extra safety checkpoint/backup controls
+    time_save_interval_seconds: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "If set, additionally save a lightweight time-based snapshot every N seconds during training. "
+                "This complements step-based checkpointing to avoid losing progress before hitting save_steps."
+            )
+        },
+    )
+    gdrive_backup_dir: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Optional Google Drive backup directory. If set, each checkpoint/snapshot will be mirrored here. "
+                "Use an absolute path, e.g. G:/My Drive/your_project/checkpoints (Windows) or /content/drive/... (Colab)."
+            )
+        },
+    )
+    backup_keep_last: Optional[int] = field(
+        default=3,
+        metadata={
+            "help": "Max number of backups to keep in gdrive_backup_dir. Older ones are pruned."
+        },
+    )
+
 
 @dataclass
 class Seq2SeqTrainingArguments(TrainingArguments):

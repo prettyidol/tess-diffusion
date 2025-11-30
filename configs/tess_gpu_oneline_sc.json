@@ -1,0 +1,45 @@
+{
+  "model_name_or_path": "roberta-base",
+  "tokenizer_name": null,
+  "train_file": "tess_train1_oneline.txt",
+  "validation_file": "tess_valid1_oneline.txt",
+  "line_by_line": true,
+  "max_seq_length": 256,
+  "pad_to_max_length": true,
+
+  "output_dir": "%GDRIVE%/tess_gpu_oneline_sc",
+  "overwrite_output_dir": true,
+  "do_train": true,
+  "do_eval": true,
+  "per_device_train_batch_size": 16,
+  "per_device_eval_batch_size": 16,
+  "gradient_accumulation_steps": 1,
+  "learning_rate": 1e-4,
+  "weight_decay": 0.01,
+  "num_train_epochs": 1,
+  "logging_steps": 50,
+  "save_strategy": "steps",
+  "save_steps": 500,
+  "save_total_limit": 5,
+  "evaluation_strategy": "steps",
+  "eval_steps": 500,
+  "report_to": ["tensorboard"],
+  "time_save_interval_seconds": 300,
+  "gdrive_backup_dir": null,
+  "backup_keep_last": 3,
+
+  "simplex_value": 5,
+  "num_diffusion_steps": 500,
+  "num_inference_diffusion_steps": 100,
+  "beta_schedule": "squaredcos_improved_ddpm",
+  "clip_sample": true,
+
+  "skip_special_tokens": false,
+  "conditional_generation": null,
+
+  "self_condition": "logits_addition",
+  "self_condition_zeros_after_softmax": true,
+
+  "without_compute_metrics": true,
+  "fp16": true
+}

@@ -177,6 +177,18 @@ class SpanInfillingDataCollator:
         )
         if "attention_mask" in batch:
             del batch["attention_mask"]
+        # 若样本中提供了 entity_mask，则按 batch 的最大长度进行零填充并堆叠
+        if len(features) > 0 and "entity_mask" in features[0]:
+            max_len = batch["input_ids"].shape[1]
+            padded_entity = []
+            for f in features:
+                m = f.get("entity_mask", [])
+                # 转为长度 max_len 的列表，右侧补 0
+                if isinstance(m, torch.Tensor):
+                    m = m.tolist()
+                m = (m + [0] * max(0, max_len - len(m)))[:max_len]
+                padded_entity.append(m)
+            batch["entity_mask"] = torch.tensor(padded_entity, dtype=torch.long)
         return {**batch, **masks}
 
 

@@ -136,6 +136,8 @@ class DiffusionTrainer(Trainer):
         if self.data_args.truncation_length > 0:
             inputs["input_ids"] = inputs["input_ids"][:, : -self.data_args.truncation_length]
             inputs["span_mask"] = inputs["span_mask"][:, : -self.data_args.truncation_length]
+            if "entity_mask" in inputs:
+                inputs["entity_mask"] = inputs["entity_mask"][:, : -self.data_args.truncation_length]
 
         # Creates the noisy simplex and timesteps.
         simplex = convert_to_simplex(inputs["input_ids"], self.diffusion_args.simplex_value, self.vocab_size)
@@ -143,14 +145,21 @@ class DiffusionTrainer(Trainer):
         bsz = simplex.shape[0]
         # Sample a random timestep for each simplex token representation.
         timesteps = torch.randint(0, len(self.noise_scheduler), (bsz,), device=simplex.device, dtype=torch.int64)
-        # Adds noise to each simplex representation (Forward diffusion process).
-        noisy_simplex = self.noise_scheduler.add_noise(simplex, noise, timesteps)
+        # 仅对实体位置加噪：优先使用 entity_mask；若无则退化为 span_mask；否则对全序列加噪。
+        mask_to_noise = None
+        if "entity_mask" in inputs:
+            mask_to_noise = inputs["entity_mask"].to(simplex.device)
+        elif "span_mask" in inputs:
+            mask_to_noise = inputs["span_mask"].to(simplex.device)
+        noisy_simplex = self.noise_scheduler.add_noise(simplex, noise, timesteps, mask=mask_to_noise)
         timesteps = scale(timesteps, len(self.noise_scheduler))
 
         inputs.update({"timesteps": timesteps, "simplex": noisy_simplex})
+        # 确保self_condition参数从config传递到model
         if self.diffusion_args.self_condition is not None:
             previous_pred = None
             if np.random.rand(1) > 0.5:
+                # 第一次forward不传previous_pred
                 outputs = model(**inputs, previous_pred=previous_pred)
                 logits_projection_fct = lambda x: logits_projection(
                     x,
@@ -159,10 +168,14 @@ class DiffusionTrainer(Trainer):
                     self.diffusion_args.simplex_value,
                     self.diffusion_args.temperature,
                 )
+                # 计算self-condition预测
                 previous_pred = self_condition_preds(
                     self.diffusion_args.self_condition, outputs.logits, logits_projection_fct
                 )
             inputs.update({"previous_pred": previous_pred})
+        else:
+            # 显式设置为None以保证一致性
+            inputs.update({"previous_pred": None})
         # NOTE: we do this after computation of self-conditioning to not affect that one.
         inputs.update({"classifier_free_guidance_in_train": self.classifier_free_guidance})
         with self.autocast_smart_context_manager():
@@ -588,14 +601,18 @@ class DiffusionTrainer(Trainer):
         return output.metrics
 
     def log_results_to_tensorboard(self, state, output):
-        # TODO: we need to fix this which happens during the only eval option.
-        if self.tb_writer.tb_writer is None:
+        # 在未启用 TensorBoard（report_to 为空或未包含 tensorboard）时，
+        # self.tb_writer 可能为 None，或其内部 tb_writer 为空，需安全退出。
+        if self.tb_writer is None:
+            return
+        tb = getattr(self.tb_writer, "tb_writer", None)
+        if tb is None:
             return
         for i in range(len(output.logits)):
             total_text = ""
             for k, v in output.results.items():
                 total_text += f"*** {k} ***: {v[i]}" + "  \n"
-            self.tb_writer.tb_writer.add_text(f"sample_{i}", total_text, state.global_step)
+            tb.add_text(f"sample_{i}", total_text, state.global_step)
 
     def get_train_dataloader(self) -> DataLoader:
         """

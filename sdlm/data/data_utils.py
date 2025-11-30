@@ -69,18 +69,47 @@ def tokenize_data_new(data_args, tokenizer, raw_datasets, training_args):
 
         def tokenize_function(examples):
             # Remove empty lines
-            examples[text_column_name] = [
-                line for line in examples[text_column_name] if len(line) > 0 and not line.isspace()
-            ]
-            return tokenizer(
-                examples[text_column_name],
+            texts = [line for line in examples[text_column_name] if len(line) > 0 and not line.isspace()]
+            enc = tokenizer(
+                texts,
                 padding=padding,
                 truncation=True,
                 max_length=max_seq_length,
-                # We use this option because DataCollatorForLanguageModeling (see below) is more efficient when it
-                # receives the `special_tokens_mask`.
+                return_offsets_mapping=True,  # 用 offset 对齐实体字符跨度到 token
                 return_special_tokens_mask=True,
             )
+
+            # 基于制表符切分：假定 oneline 为 h \t r \t t \t time(可选)
+            entity_masks = []
+            for s, offsets in zip(texts, enc["offset_mapping"]):
+                # 计算头、尾实体的字符区间
+                tab_pos = [i for i, ch in enumerate(s) if ch == "\t"]
+                if len(tab_pos) >= 2:
+                    h_span = (0, tab_pos[0])
+                    # tail 在第二个制表符之后直到第三个制表符或行尾
+                    t_start = tab_pos[1] + 1
+                    t_end = tab_pos[2] if len(tab_pos) >= 3 else len(s)
+                    t_span = (t_start, t_end)
+                else:
+                    # 兜底：若格式异常，全部不加噪
+                    h_span = (-1, -1)
+                    t_span = (-1, -1)
+
+                # 将字符区间映射到 token：只标记实体（头、尾）为 1
+                mask = []
+                for (a, b) in offsets:
+                    if a == b:  # 特殊/填充 token
+                        mask.append(0)
+                        continue
+                    overlap_h = max(a, h_span[0]) < min(b, h_span[1])
+                    overlap_t = max(a, t_span[0]) < min(b, t_span[1])
+                    mask.append(1 if (overlap_h or overlap_t) else 0)
+                entity_masks.append(mask)
+
+            # 删掉临时的 offset 映射，避免增大样本体积
+            enc.pop("offset_mapping", None)
+            enc["entity_mask"] = entity_masks
+            return enc
 
         with training_args.main_process_first(desc="dataset map tokenization"):
             tokenized_datasets = raw_datasets.map(

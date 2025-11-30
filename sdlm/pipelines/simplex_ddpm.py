@@ -98,7 +98,18 @@ class SimplexDDPMPipeline(DiffusionPipeline):
             # Adapts the sequence length to the given `span_mask`'s length.
             seq_length = batch["input_ids"].shape[1]
         simplex_shape = (batch_size, seq_length, vocab_size)
-        simplex = self.simplex_value * torch.randn(simplex_shape, generator=generator, device=self.device)
+        # 仅对实体位置初始化噪声：优先使用 entity_mask，否则退化为 span_mask；若都没有则对全序列加噪
+        mask_to_noise = None
+        if batch is not None:
+            if "entity_mask" in batch:
+                mask_to_noise = batch["entity_mask"].to(self.device)
+            elif "span_mask" in batch:
+                mask_to_noise = batch["span_mask"].to(self.device)
+        if mask_to_noise is not None:
+            mask3d = mask_to_noise[:, :, None].to(dtype=torch.float32)
+            simplex = mask3d * (self.simplex_value * torch.randn(simplex_shape, generator=generator, device=self.device))
+        else:
+            simplex = self.simplex_value * torch.randn(simplex_shape, generator=generator, device=self.device)
         if self.model.config.self_condition is not None:
             previous_pred = torch.zeros((batch_size, seq_length, vocab_size), device=self.device)
         logits_projection_fct = lambda x: logits_projection(
@@ -152,7 +163,12 @@ class SimplexDDPMPipeline(DiffusionPipeline):
             projected_logits = logits_projection_fct(model_output_logits)
 
             # 2. compute previous logits: x_t -> x_t-1
-            noise = self.simplex_value * torch.randn(simplex_shape, generator=generator, device=self.device)
+            # 每一步仅对实体位置注入噪声（若已提供掩码）
+            if mask_to_noise is not None:
+                mask3d = mask_to_noise[:, :, None].to(dtype=torch.float32)
+                noise = mask3d * (self.simplex_value * torch.randn(simplex_shape, generator=generator, device=self.device))
+            else:
+                noise = self.simplex_value * torch.randn(simplex_shape, generator=generator, device=self.device)
             simplex = self.scheduler.step(projected_logits, t, noise, generator=generator).prev_sample
 
         return SimplexDiffusionPipelineOutput(simplex=simplex, logits=model_output_logits, loss=model_output.loss)

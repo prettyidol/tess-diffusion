@@ -8,7 +8,7 @@ from datasets import load_dataset
 from sdlm.arguments import DataTrainingArguments, ModelArguments, TrainingArguments
 from transformers import AutoTokenizer, HfArgumentParser, set_seed
 from transformers.utils.versions import require_version
-from accelerate import Accelerator
+from accelerate import Accelerator 
 from sdlm.data.data_utils import tokenize_data
 
 require_version("datasets>=1.8.0")

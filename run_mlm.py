@@ -24,8 +24,10 @@ from sdlm.trainer import DiffusionTrainer
 from sdlm.schedulers import SimplexDDPMScheduler
 from sdlm.inference.inference_utils import evaluate_generation
 from sdlm.data.data_collator import SpanInfillingDataCollator
+from sdlm.data.kg_quad_collator import KGQuadCollator, KGQuadCollatorForEval
 from sdlm.data.data_utils import split_data_to_train_validation
 from transformers.trainer_callback import TrainerState
+from sdlm.callbacks import TimeAndGDriveBackupCallback
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -67,6 +69,17 @@ def main():
         model_args, data_args, training_args, diffusion_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args, diffusion_args = parser.parse_args_into_dataclasses()
+
+    # Expand environment variables and user home in output/backup dirs (Windows: %VARS%, *nix: $VARS)
+    if getattr(training_args, "output_dir", None):
+        training_args.output_dir = os.path.normpath(
+            os.path.expandvars(os.path.expanduser(training_args.output_dir))
+        )
+    if getattr(training_args, "gdrive_backup_dir", None):
+        if training_args.gdrive_backup_dir:
+            training_args.gdrive_backup_dir = os.path.normpath(
+                os.path.expandvars(os.path.expanduser(training_args.gdrive_backup_dir))
+            )
 
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
@@ -217,19 +230,48 @@ def main():
             return logits.argmax(dim=-1)
 
     # Data collator
-    # TODO: fix lambda max_seq_length, extra_padding_ratio:
+    # 对于KG任务,使用KGQuadCollator以保护实体边界;对于其他任务,使用通用SpanInfillingDataCollator
     pad_to_multiple_of_8 = data_args.line_by_line and training_args.fp16 and not data_args.pad_to_max_length
-    data_collator = lambda mode: SpanInfillingDataCollator(
-        mode=mode,
-        data_args=data_args,
-        tokenizer=tokenizer,
-        max_length=data_args.max_seq_length,
-        seed=training_args.seed,
-        pad_to_multiple_of=8 if pad_to_multiple_of_8 else None,
-        eval_context_size=data_args.eval_context_size,
-    )
+    
+    def create_data_collator(mode):
+        """根据任务类型选择合适的collator"""
+        # 如果有conditional_generation配置,用通用collator(用于其他任务)
+        # 否则认为是KG任务,使用KGQuadCollator
+        if data_args.conditional_generation and data_args.conditional_generation in [
+            "span_infilling", "prefix_lm", "ul2", "ul2_with_unconditional", "ul2_variable"
+        ]:
+            return SpanInfillingDataCollator(
+                mode=mode,
+                data_args=data_args,
+                tokenizer=tokenizer,
+                max_length=data_args.max_seq_length,
+                seed=training_args.seed,
+                pad_to_multiple_of=8 if pad_to_multiple_of_8 else None,
+                eval_context_size=data_args.eval_context_size,
+            )
+        else:
+            # KG任务: 使用KGQuadCollator
+            if mode == "train":
+                return KGQuadCollator(
+                    tokenizer=tokenizer,
+                    mode=mode,
+                    max_length=data_args.max_seq_length,
+                    seed=training_args.seed,
+                    mask_entity_prob=0.15,
+                    mask_relation_prob=0.10,
+                    mask_time_prob=0.05,
+                )
+            else:
+                return KGQuadCollatorForEval(
+                    tokenizer=tokenizer,
+                    max_length=data_args.max_seq_length,
+                )
+    
+    data_collator = create_data_collator
 
-    if training_args.do_eval:
+    compute_metrics = None
+    if training_args.do_eval and not training_args.without_compute_metrics:
+        # Only construct metric function (which loads a large AR model) when metrics are actually requested.
         compute_metrics = get_compute_metrics(data_args, training_args, model_args)
 
     # Initialize our Trainer
@@ -247,6 +289,12 @@ def main():
         data_args=data_args,
         inference_noise_scheduler=inference_noise_scheduler,
     )
+
+    # Register time-based and Google Drive backup callback if requested via args
+    try:
+        trainer.add_callback(TimeAndGDriveBackupCallback())
+    except Exception as e:
+        logger.warning(f"Failed to register TimeAndGDriveBackupCallback: {e}")
 
     # Training
     if training_args.do_train:
@@ -268,10 +316,30 @@ def main():
 
     # Evaluation
     if training_args.do_eval:
+        # Ensure eval uses the trained model checkpoint, not the initial roberta-base
+        # Priority: last checkpoint (with full state) > output root (only trainer_state.json)
         if training_args.load_states_in_eval_from_model_path:
-            trainer._load_from_checkpoint(model_args.model_name_or_path)
-            trainer.state = TrainerState.load_from_json(os.path.join(model_args.model_name_or_path, "trainer_state.json"))
-            trainer._load_rng_state(model_args.model_name_or_path)
+            eval_checkpoint = get_last_checkpoint(training_args.output_dir)
+            if eval_checkpoint is not None:
+                # Found a checkpoint-XXXX with optimizer/scheduler/rng states
+                logger.info(f"Loading full training state from last checkpoint: {eval_checkpoint}")
+                trainer._load_from_checkpoint(eval_checkpoint)
+                trainer.state = TrainerState.load_from_json(os.path.join(eval_checkpoint, "trainer_state.json"))
+                trainer._load_rng_state(eval_checkpoint)
+            else:
+                # No checkpoint-XXXX, try root directory for trainer_state.json only
+                root_state_path = os.path.join(training_args.output_dir, "trainer_state.json")
+                if os.path.exists(root_state_path):
+                    logger.warning(
+                        f"No checkpoint found in {training_args.output_dir}. "
+                        f"Loading trainer_state.json from root; optimizer/scheduler states unavailable."
+                    )
+                    trainer.state = TrainerState.load_from_json(root_state_path)
+                else:
+                    logger.warning(
+                        f"No checkpoint or trainer_state.json found in {training_args.output_dir}. "
+                        "Skipping training state restore; using in-memory model for eval."
+                    )
 
         # np.save("weights.npy", model.vocab_to_hidden_dim_embed.weight.data.numpy())
 

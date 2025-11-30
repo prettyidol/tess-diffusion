@@ -19,7 +19,16 @@ def join_texts(prefixes, sentences):
 
 
 def convert_to_simplex(token_ids, simplex_value, vocab_size):
-    return 2 * simplex_value * F.one_hot(token_ids, vocab_size) - simplex_value
+    """将 token ids one-hot 后映射到 simplex 空间，并显式使用 float32。
+
+    说明：F.one_hot 返回的是 LongTensor（int64）。
+    在 CPU 上若继续保持 long，再去调用 torch.randn(dtype=simplex.dtype) 会触发
+    “normal_kernel_cpu not implemented for 'Long'” 的报错。
+    因此这里将 one-hot 显式转为 float32，确保后续噪声与计算使用浮点数。
+    """
+    one_hot = F.one_hot(token_ids, vocab_size).to(dtype=torch.float32)
+    simplex_value = float(simplex_value)
+    return 2.0 * simplex_value * one_hot - simplex_value
 
 
 def scale(inputs, scale_value):

@@ -160,6 +160,7 @@ class SimplexDDPMScheduler(DDPMScheduler):
         original_samples: torch.FloatTensor,
         noise: torch.FloatTensor,
         timesteps: torch.IntTensor,
+        mask: Optional[torch.Tensor] = None,
     ) -> torch.FloatTensor:
         # Make sure alphas_cumprod and timestep have same device and dtype as original_samples
         # self.alphas_cumprod = self.alphas_cumprod.to(device=original_samples.device, dtype=original_samples.dtype)
@@ -168,5 +169,13 @@ class SimplexDDPMScheduler(DDPMScheduler):
         alphas_cumprod_timesteps = self.alphas_cumprod[timesteps].view(-1, 1, 1)
         sqrt_alpha_prod = alphas_cumprod_timesteps**0.5
         sqrt_one_minus_alpha_prod = (1 - alphas_cumprod_timesteps) ** 0.5
-        noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
+        # 默认对所有 token 加噪；若提供 mask（形状 [B, L] 或 [B, L, 1]），仅对 mask=1 的位置加噪，其他位置保持原样
+        if mask is not None:
+            if mask.dim() == 2:
+                mask = mask.unsqueeze(-1)
+            mask = mask.to(device=original_samples.device, dtype=original_samples.dtype)
+            noisy_part = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
+            noisy_samples = mask * noisy_part + (1.0 - mask) * original_samples
+        else:
+            noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
         return noisy_samples

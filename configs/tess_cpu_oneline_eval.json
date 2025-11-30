@@ -1,0 +1,31 @@
+{
+  "model_name_or_path": "outputs/tess_cpu_oneline",
+  "tokenizer_name": "roberta-base",
+  "train_file": "tess_train1_oneline.txt",
+  "validation_file": "tess_valid1_oneline.txt",
+  "line_by_line": true,
+  "max_seq_length": 256,
+  "pad_to_max_length": true,
+
+  "output_dir": "outputs/tess_cpu_oneline",
+  "overwrite_output_dir": false,
+  "do_train": false,
+  "do_eval": true,
+  "max_eval_samples": 200,
+  "no_cuda": true,
+
+  "per_device_eval_batch_size": 2,
+  "report_to": [],
+
+  "simplex_value": 5,
+  "num_diffusion_steps": 200,
+  "num_inference_diffusion_steps": 200,
+  "beta_schedule": "squaredcos_improved_ddpm",
+  "clip_sample": true,
+
+  "skip_special_tokens": false,
+  "conditional_generation": null,
+
+  "without_compute_metrics": true,
+  "load_states_in_eval_from_model_path": true
+}
