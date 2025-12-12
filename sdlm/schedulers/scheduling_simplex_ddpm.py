@@ -62,7 +62,7 @@ def betas_for_alpha_bar(num_diffusion_timesteps, device, max_beta=0.999, improve
     # TODO(rabeeh): maybe this cause memory issue.
     betas = torch.tensor(betas, dtype=torch.float32, device=device)
     if improved_ddpm:
-        return betas, torch.tensor(alphas_cumprod, dtype=torch.torch.float32, device=device)
+        return betas, torch.tensor(alphas_cumprod, dtype=torch.float32, device=device)
     return betas
 
 

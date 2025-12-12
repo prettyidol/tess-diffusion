@@ -1,0 +1,12 @@
+{
+  "tokenizer_name": "extended_tokenizer",
+  "output_dir": "/content/drive/MyDrive/tess_outputs",
+  "per_device_train_batch_size": 8,
+  "per_device_eval_batch_size": 8,
+  "num_train_epochs": 3,
+  "fp16": true,
+  "time_save_interval_seconds": 1800,
+  "gdrive_backup_dir": "/content/drive/MyDrive/tess_backups",
+  "backup_keep_last": 2,
+  "save_total_limit": 5
+}

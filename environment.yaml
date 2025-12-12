@@ -1,29 +1,41 @@
 name: sdlm
 channels:
   - pytorch
+  - conda-forge
   - defaults
 dependencies:
   - python=3.9
-  - pytorch=1.12.0
-  - cudatoolkit=11.3
   - pip
   - pip:
+      # PyTorch 2.2.0 with CUDA 11.8 support
+      - torch==2.2.0
+      - torchvision==0.17.0
+      - torchaudio==2.2.0
+      # Core ML libraries (updated versions)
+      - transformers==4.33.3
+      - datasets==2.14.6
+      - diffusers==0.27.2
+      - accelerate==0.23.0
+      - evaluate==0.4.6
+      - sentencepiece==0.2.1
+      # Scientific computing
+      - scikit-learn==1.2.2
+      - scipy==1.9.3
+      - numpy==1.23.5
+      # NLP & metrics
+      - sacrebleu==2.5.1
+      - nltk==3.9.2
+      # Data & serialization
+      - pyarrow==10.0.1
+      # Monitoring & dev tools
+      - tensorboard==2.17.0
+      - ipython==8.4.0
+      # HuggingFace ecosystem
+      - huggingface_hub==0.23.5
+      - tokenizers==0.13.3
+      - protobuf==4.25.3
+      - fsspec==2023.9.2
+      # Additional dependencies
       - sacremoses
       - rouge_score
-      - accelerate==0.12.0
-      - ipython==8.4.0
-      - tensorboard==2.9.1
-      - datasets==2.14.6
-      - transformers==4.25.1
-      - diffusers==v0.7.2
-      - huggingface_hub==0.14.0
-      - torchvision==0.13.0
-      - torchaudio==0.12.0
-      - scipy==1.9.3
-      - scikit-learn==1.2.2
-      - pyarrow==10.0.1
-      - nltk
-      - sentencepiece
-      - sacrebleu
-      - evaluate
       - bert_score

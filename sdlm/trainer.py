@@ -45,7 +45,7 @@ from sdlm.inference.inference_utils import predict_conditional_generated, logits
 from sdlm.utils import self_condition_preds, pad_data
 from torch.nn import CrossEntropyLoss
 from transformers.utils import is_sagemaker_mp_enabled
-from transformers import AdamW
+from torch.optim import AdamW
 import shutil
 from transformers.trainer import TRAINER_STATE_NAME
 
@@ -155,12 +155,16 @@ class DiffusionTrainer(Trainer):
         timesteps = scale(timesteps, len(self.noise_scheduler))
 
         inputs.update({"timesteps": timesteps, "simplex": noisy_simplex})
+        
+        # Remove entity_mask before ANY model calls (only used for noise masking, not model input)
+        inputs_for_model = {k: v for k, v in inputs.items() if k != 'entity_mask'}
+        
         # 确保self_condition参数从config传递到model
         if self.diffusion_args.self_condition is not None:
             previous_pred = None
             if np.random.rand(1) > 0.5:
                 # 第一次forward不传previous_pred
-                outputs = model(**inputs, previous_pred=previous_pred)
+                outputs = model(**inputs_for_model, previous_pred=previous_pred)
                 logits_projection_fct = lambda x: logits_projection(
                     x,
                     self.diffusion_args.sampling_type,
@@ -172,14 +176,15 @@ class DiffusionTrainer(Trainer):
                 previous_pred = self_condition_preds(
                     self.diffusion_args.self_condition, outputs.logits, logits_projection_fct
                 )
-            inputs.update({"previous_pred": previous_pred})
+            inputs_for_model.update({"previous_pred": previous_pred})
         else:
             # 显式设置为None以保证一致性
-            inputs.update({"previous_pred": None})
+            inputs_for_model.update({"previous_pred": None})
         # NOTE: we do this after computation of self-conditioning to not affect that one.
-        inputs.update({"classifier_free_guidance_in_train": self.classifier_free_guidance})
+        inputs_for_model.update({"classifier_free_guidance_in_train": self.classifier_free_guidance})
+        
         with self.autocast_smart_context_manager():
-            loss = self.compute_loss(model, inputs)
+            loss = self.compute_loss(model, inputs_for_model)
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -218,7 +223,7 @@ class DiffusionTrainer(Trainer):
                     guidance_scale=self.diffusion_args.guidance_scale,
                     generator=torch.Generator(device=self.args.device).manual_seed(self.args.seed) if self.diffusion_args.generate_with_seed else None,
                 )
-                if is_conditional_generation:
+                if is_conditional_generation and outputs.loss is not None:
                     loss = outputs.loss.mean().detach()
                 else:
                     loss = None
